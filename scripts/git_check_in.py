@@ -44,10 +44,37 @@ def list_changed_files():
         files.append(path)
     return files
 
+def has_any_changes_from_develop():
+    """
+    Check if there are any uncommitted or committed changes compared to develop.
+    Returns True if there are changes, False if working tree matches develop exactly.
+    """
+    # First check uncommitted changes
+    status_result = run(["git", "status", "--porcelain"], capture_output=True, show_command=False)
+    if status_result.stdout.strip():
+        return True
+    
+    # Check if current branch has commits ahead of develop
+    current_branch = get_current_branch()
+    
+    # Fetch latest develop silently
+    run(["git", "fetch", "origin", "develop"], capture_output=True, show_command=False, check=False)
+    
+    # Compare with origin/develop
+    diff_result = run(
+        ["git", "diff", "--quiet", "origin/develop", "HEAD"],
+        check=False,
+        capture_output=True,
+        show_command=False
+    )
+    
+    # If returncode is 0, no differences; if 1, there are differences
+    return diff_result.returncode != 0
+
 def safe_checkout(branch_name, create_new=False):
     """
     Try to checkout a branch, handle uncommitted changes if checkout fails.
-    Returns True if successful.
+    Returns True if successful, "skip_checkout" if user wants to commit files.
     """
     cmd = ["git", "checkout", "-b", branch_name] if create_new else ["git", "checkout", branch_name]
     
@@ -86,8 +113,6 @@ def safe_checkout(branch_name, create_new=False):
             if choice == "1":
                 print("\n✓ You chose to commit these files.")
                 print("The script will continue and include these in your commit.")
-                # Don't actually checkout yet - we'll handle the files in the main flow
-                # Just skip the checkout for now
                 return "skip_checkout"
             
             elif choice == "2":
@@ -100,7 +125,6 @@ def safe_checkout(branch_name, create_new=False):
                 
                 if stash_result.returncode == 0:
                     print("✓ Changes stashed successfully")
-                    # Try checkout again
                     retry = subprocess.run(cmd, check=False, text=True, capture_output=True)
                     if retry.returncode == 0:
                         print(retry.stdout, end='')
@@ -135,12 +159,10 @@ def safe_checkout(branch_name, create_new=False):
                         except Exception as e:
                             print(f"Warning: Could not update .gitignore: {e}")
                     
-                    # Discard changes
                     run(["git", "reset", "--hard", "HEAD"], check=False)
                     run(["git", "clean", "-fd"], check=False)
                     print("✓ Changes discarded")
                     
-                    # Try checkout again
                     retry = subprocess.run(cmd, check=False, text=True, capture_output=True)
                     if retry.returncode == 0:
                         print(retry.stdout, end='')
@@ -161,7 +183,6 @@ def safe_checkout(branch_name, create_new=False):
                 print("Invalid choice. Please enter 1, 2, 3, or 4.")
     
     else:
-        # Some other error
         print("ERROR: Checkout failed")
         print(result.stderr)
         sys.exit(1)
@@ -305,6 +326,19 @@ def main():
     current_branch = get_current_branch()
     print(f"Current branch: {current_branch}")
 
+    # EARLY EXIT: Check if there are any changes at all
+    print("\n=== Checking for changes ===")
+    if not has_any_changes_from_develop():
+        print("\n" + "="*60)
+        print("ℹ  NO CHANGES DETECTED")
+        print("="*60)
+        print("Your working directory has no uncommitted changes,")
+        print("and your current branch has no new commits compared to develop.")
+        print("\nNothing to commit. Exiting.")
+        sys.exit(0)
+    
+    print("✓ Changes detected. Proceeding with check-in...")
+
     # STEP 1: Switch to develop and pull latest
     print("\n=== Updating develop branch ===")
     checkout_result = safe_checkout("develop")
@@ -404,13 +438,61 @@ def main():
     print(f"Ready to push to: origin/{current_branch}")
     ans = input("Proceed with push? [y/N]: ").strip().lower()
     
-    if ans == "y":
-        run(["git", "push", "-u", "origin", current_branch])
-        print(f"\n✓ Successfully pushed to origin/{current_branch}")
-        print(f"✓ Create a Pull/Merge Request from '{current_branch}' to 'develop'")
-    else:
+    if ans != "y":
         print("Commit created locally but not pushed.")
         print(f"To push later: git push -u origin {current_branch}")
+        sys.exit(0)
+    
+    run(["git", "push", "-u", "origin", current_branch])
+    print(f"\n✓ Successfully pushed to origin/{current_branch}")
+    
+    # STEP 7: Post-push cleanup
+    print("\n" + "="*60)
+    print("POST-PUSH CLEANUP")
+    print("="*60)
+    
+    feature_branch = current_branch  # Save feature branch name
+    
+    # Switch back to develop
+    print("\nSwitching back to develop...")
+    run(["git", "checkout", "develop"])
+    
+    # Pull latest develop
+    print("\nPulling latest from develop...")
+    run(["git", "pull", "origin", "develop"])
+    
+    # Ask if want to delete feature branch
+    print(f"\n✓ You are now back on develop.")
+    print(f"Your feature branch '{feature_branch}' still exists locally.")
+    
+    delete_branch = input(f"\nDelete local branch '{feature_branch}'? [y/N]: ").strip().lower()
+    
+    if delete_branch == "y":
+        result = run(["git", "branch", "-d", feature_branch], check=False, capture_output=True)
+        if result.returncode == 0:
+            print(f"✓ Branch '{feature_branch}' deleted locally.")
+        else:
+            # Try force delete if regular delete fails
+            print(f"Branch has unmerged changes. Force delete? [y/N]: ", end='')
+            force = input().strip().lower()
+            if force == "y":
+                run(["git", "branch", "-D", feature_branch])
+                print(f"✓ Branch '{feature_branch}' force-deleted locally.")
+            else:
+                print(f"Branch '{feature_branch}' kept locally.")
+    else:
+        print(f"Branch '{feature_branch}' kept locally.")
+    
+    # Final reminder
+    print("\n" + "="*60)
+    print("NEXT STEPS")
+    print("="*60)
+    print(f"1. Create a Pull/Merge Request from '{feature_branch}' to 'develop'")
+    print("2. Wait for PR approval and merge")
+    print("3. After merge, run this script again or manually run:")
+    print("   $ git checkout develop")
+    print("   $ git pull origin develop")
+    print("\n✓ Check-in complete!")
 
 if __name__ == "__main__":
     main()
