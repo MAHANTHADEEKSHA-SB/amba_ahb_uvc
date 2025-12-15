@@ -1,6 +1,35 @@
 #!/usr/bin/env python3
 import subprocess
 import sys
+import atexit
+
+# Track the feature branch for cleanup
+pushed_branch = None
+
+def cleanup_and_return_to_develop():
+    """Always return to develop and pull before exiting."""
+    try:
+        current = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False
+        ).stdout.strip()
+        
+        if current != "develop":
+            print("\n" + "="*60)
+            print("RETURNING TO DEVELOP")
+            print("="*60)
+            subprocess.run(["git", "checkout", "develop"], check=False)
+        
+        print("Pulling latest from develop...")
+        subprocess.run(["git", "pull", "origin", "develop"], check=False)
+        print("✓ You are on develop with latest changes.")
+    except:
+        pass
+
+# Register cleanup function to run on exit
+atexit.register(cleanup_and_return_to_develop)
 
 def run(cmd, check=True, capture_output=False, show_command=True):
     """Run a command and optionally capture output."""
@@ -49,18 +78,13 @@ def has_any_changes_from_develop():
     Check if there are any uncommitted or committed changes compared to develop.
     Returns True if there are changes, False if working tree matches develop exactly.
     """
-    # First check uncommitted changes
     status_result = run(["git", "status", "--porcelain"], capture_output=True, show_command=False)
     if status_result.stdout.strip():
         return True
     
-    # Check if current branch has commits ahead of develop
     current_branch = get_current_branch()
-    
-    # Fetch latest develop silently
     run(["git", "fetch", "origin", "develop"], capture_output=True, show_command=False, check=False)
     
-    # Compare with origin/develop
     diff_result = run(
         ["git", "diff", "--quiet", "origin/develop", "HEAD"],
         check=False,
@@ -68,7 +92,6 @@ def has_any_changes_from_develop():
         show_command=False
     )
     
-    # If returncode is 0, no differences; if 1, there are differences
     return diff_result.returncode != 0
 
 def safe_checkout(branch_name, create_new=False):
@@ -81,12 +104,10 @@ def safe_checkout(branch_name, create_new=False):
     print(f"$ {' '.join(cmd)}")
     result = subprocess.run(cmd, check=False, text=True, capture_output=True)
     
-    # Success - return immediately
     if result.returncode == 0:
         print(result.stdout, end='')
         return True
     
-    # Check if it's the "would be overwritten" error
     if "would be overwritten" in result.stderr or "Please commit your changes or stash them" in result.stderr:
         print(result.stderr)
         
@@ -217,10 +238,13 @@ def sync_branch_with_develop(branch_name):
     """Sync given branch with develop by merging develop into it."""
     print(f"\n=== Syncing '{branch_name}' with develop ===")
     
-    checkout_result = safe_checkout(branch_name)
-    if checkout_result == "skip_checkout":
-        print("Skipping checkout for now...")
-        return
+    # Make sure we're on the branch
+    current = get_current_branch()
+    if current != branch_name:
+        checkout_result = safe_checkout(branch_name)
+        if checkout_result == "skip_checkout":
+            print("Skipping checkout for now...")
+            return
     
     result = run(["git", "merge", "develop"], check=False, capture_output=True)
     
@@ -320,6 +344,8 @@ def get_conventional_commit_message():
     return commit_msg
 
 def main():
+    global pushed_branch
+    
     # Verify we're in a git repository
     run(["git", "rev-parse", "--is-inside-work-tree"], show_command=False)
 
@@ -345,7 +371,6 @@ def main():
     
     if checkout_result == "skip_checkout":
         print("\n✓ Staying on current branch to commit your changes.")
-        print("You can merge from develop later if needed.")
     else:
         run(["git", "pull", "origin", "develop"])
         
@@ -369,38 +394,38 @@ def main():
         
         break
 
-    # STEP 3: Check if branch exists and handle accordingly
+    # STEP 3: Handle existing branch or current branch scenario
     final_branch = desired_branch
     current_branch = get_current_branch()
     
-    if current_branch == desired_branch:
-        print(f"✓ Already on branch '{desired_branch}'")
-        final_branch = desired_branch
-    elif branch_exists(desired_branch):
-        print(f"\n⚠ Branch '{desired_branch}' already exists.")
+    # Case 1: Already on the desired branch OR branch exists
+    if current_branch == desired_branch or branch_exists(desired_branch):
+        if current_branch == desired_branch:
+            print(f"\n✓ You are already on branch '{desired_branch}'")
+        else:
+            print(f"\n⚠ Branch '{desired_branch}' already exists locally.")
         
-        use_existing = input("Use this existing branch and sync with develop? [y/N]: ").strip().lower()
+        # Ask if they want to update it with develop
+        update_branch = input(f"Do you want to update '{desired_branch}' with latest develop? [y/N]: ").strip().lower()
         
-        if use_existing == "y":
-            if is_branch_up_to_date_with_develop(desired_branch):
-                print(f"✓ Branch is up to date with develop.")
+        if update_branch == "y":
+            # Update the branch with develop
+            if current_branch != desired_branch:
                 safe_checkout(desired_branch)
+            
+            if is_branch_up_to_date_with_develop(desired_branch):
+                print(f"✓ Branch '{desired_branch}' is already up to date with develop.")
             else:
-                print(f"Branch is outdated.")
-                sync_confirm = input("Sync with develop now? [y/N]: ").strip().lower()
-                
-                if sync_confirm == "y":
-                    sync_branch_with_develop(desired_branch)
-                else:
-                    print("Cannot proceed without syncing. Aborting.")
-                    sys.exit(0)
+                sync_branch_with_develop(desired_branch)
             
             final_branch = desired_branch
         else:
+            # Create a new branch with "_1" suffix
             final_branch = make_unique_branch_name(desired_branch)
-            print(f"Creating new branch '{final_branch}' instead.")
+            print(f"\nCreating new branch '{final_branch}' instead.")
             safe_checkout(final_branch, create_new=True)
     else:
+        # Branch doesn't exist - create it
         safe_checkout(final_branch, create_new=True)
         print(f"✓ Created and switched to: {final_branch}")
 
@@ -444,55 +469,19 @@ def main():
         sys.exit(0)
     
     run(["git", "push", "-u", "origin", current_branch])
+    pushed_branch = current_branch
+    
     print(f"\n✓ Successfully pushed to origin/{current_branch}")
-    
-    # STEP 7: Post-push cleanup
-    print("\n" + "="*60)
-    print("POST-PUSH CLEANUP")
-    print("="*60)
-    
-    feature_branch = current_branch  # Save feature branch name
-    
-    # Switch back to develop
-    print("\nSwitching back to develop...")
-    run(["git", "checkout", "develop"])
-    
-    # Pull latest develop
-    print("\nPulling latest from develop...")
-    run(["git", "pull", "origin", "develop"])
-    
-    # Ask if want to delete feature branch
-    print(f"\n✓ You are now back on develop.")
-    print(f"Your feature branch '{feature_branch}' still exists locally.")
-    
-    delete_branch = input(f"\nDelete local branch '{feature_branch}'? [y/N]: ").strip().lower()
-    
-    if delete_branch == "y":
-        result = run(["git", "branch", "-d", feature_branch], check=False, capture_output=True)
-        if result.returncode == 0:
-            print(f"✓ Branch '{feature_branch}' deleted locally.")
-        else:
-            # Try force delete if regular delete fails
-            print(f"Branch has unmerged changes. Force delete? [y/N]: ", end='')
-            force = input().strip().lower()
-            if force == "y":
-                run(["git", "branch", "-D", feature_branch])
-                print(f"✓ Branch '{feature_branch}' force-deleted locally.")
-            else:
-                print(f"Branch '{feature_branch}' kept locally.")
-    else:
-        print(f"Branch '{feature_branch}' kept locally.")
-    
-    # Final reminder
-    print("\n" + "="*60)
+    print(f"\n{'='*60}")
     print("NEXT STEPS")
-    print("="*60)
-    print(f"1. Create a Pull/Merge Request from '{feature_branch}' to 'develop'")
+    print(f"{'='*60}")
+    print(f"1. Create a Pull/Merge Request from '{current_branch}' to 'develop'")
     print("2. Wait for PR approval and merge")
-    print("3. After merge, run this script again or manually run:")
-    print("   $ git checkout develop")
-    print("   $ git pull origin develop")
     print("\n✓ Check-in complete!")
+    
+    # The atexit handler will automatically:
+    # - Switch to develop
+    # - Pull latest from develop
 
 if __name__ == "__main__":
     main()
