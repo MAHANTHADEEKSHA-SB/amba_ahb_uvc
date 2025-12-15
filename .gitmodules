@@ -1,0 +1,3 @@
+[submodule "AHB-UVC"]
+	path = AHB-UVC
+	url = git@github.com:MAHANTHADEEKSHA-SB/AHB-UVC.git
