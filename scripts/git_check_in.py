@@ -24,7 +24,7 @@ def cleanup_and_return_to_develop():
         
         print("Pulling latest from develop...")
         subprocess.run(["git", "pull", "origin", "develop"], check=False)
-        print("✓ You are on develop with latest changes.")
+        print("[OK] You are on develop with latest changes.")
     except:
         pass
 
@@ -114,7 +114,7 @@ def safe_checkout(branch_name, create_new=False):
         changed_files = list_changed_files()
         
         print("\n" + "="*60)
-        print("⚠ You have uncommitted changes blocking the checkout!")
+        print("[WARNING] You have uncommitted changes blocking the checkout!")
         print("="*60)
         
         if changed_files:
@@ -125,14 +125,14 @@ def safe_checkout(branch_name, create_new=False):
         print("\nWhat do you want to do?")
         print("1. Commit these files (will continue with check-in)")
         print("2. Stash these changes temporarily")
-        print("3. Add to .gitignore and discard (⚠ DESTRUCTIVE)")
+        print("3. Add to .gitignore and discard (*** DESTRUCTIVE ***)")
         print("4. Abort")
         
         while True:
             choice = input("\nEnter your choice (1-4): ").strip()
             
             if choice == "1":
-                print("\n✓ You chose to commit these files.")
+                print("\n[OK] You chose to commit these files.")
                 print("The script will continue and include these in your commit.")
                 return "skip_checkout"
             
@@ -145,25 +145,25 @@ def safe_checkout(branch_name, create_new=False):
                 )
                 
                 if stash_result.returncode == 0:
-                    print("✓ Changes stashed successfully")
+                    print("[OK] Changes stashed successfully")
                     retry = subprocess.run(cmd, check=False, text=True, capture_output=True)
                     if retry.returncode == 0:
                         print(retry.stdout, end='')
-                        print("✓ Checkout successful. Your changes are in stash.")
+                        print("[OK] Checkout successful. Your changes are in stash.")
                         print("  To restore later: git stash pop")
                         return True
                     else:
-                        print("ERROR: Checkout still failed:")
+                        print("[ERROR] Checkout still failed:")
                         print(retry.stderr)
                         sys.exit(1)
                 else:
-                    print("ERROR: Failed to stash:")
+                    print("[ERROR] Failed to stash:")
                     print(stash_result.stderr)
                     print("Please try another option.")
                     continue
             
             elif choice == "3":
-                print("\n⚠⚠⚠ WARNING ⚠⚠⚠")
+                print("\n*** WARNING ***")
                 print("This will PERMANENTLY DELETE your uncommitted changes!")
                 confirm = input("Type 'YES' in all caps to confirm: ").strip()
                 
@@ -176,20 +176,20 @@ def safe_checkout(branch_name, create_new=False):
                                 f.write("\n# Auto-added by git check-in script\n")
                                 for file in changed_files:
                                     f.write(f"{file}\n")
-                            print("✓ Files added to .gitignore")
+                            print("[OK] Files added to .gitignore")
                         except Exception as e:
-                            print(f"Warning: Could not update .gitignore: {e}")
+                            print(f"[WARNING] Could not update .gitignore: {e}")
                     
                     run(["git", "reset", "--hard", "HEAD"], check=False)
                     run(["git", "clean", "-fd"], check=False)
-                    print("✓ Changes discarded")
+                    print("[OK] Changes discarded")
                     
                     retry = subprocess.run(cmd, check=False, text=True, capture_output=True)
                     if retry.returncode == 0:
                         print(retry.stdout, end='')
                         return True
                     else:
-                        print("ERROR: Checkout still failed:")
+                        print("[ERROR] Checkout still failed:")
                         print(retry.stderr)
                         sys.exit(1)
                 else:
@@ -204,7 +204,7 @@ def safe_checkout(branch_name, create_new=False):
                 print("Invalid choice. Please enter 1, 2, 3, or 4.")
     
     else:
-        print("ERROR: Checkout failed")
+        print("[ERROR] Checkout failed")
         print(result.stderr)
         sys.exit(1)
 
@@ -238,7 +238,6 @@ def sync_branch_with_develop(branch_name):
     """Sync given branch with develop by merging develop into it."""
     print(f"\n=== Syncing '{branch_name}' with develop ===")
     
-    # Make sure we're on the branch
     current = get_current_branch()
     if current != branch_name:
         checkout_result = safe_checkout(branch_name)
@@ -250,7 +249,7 @@ def sync_branch_with_develop(branch_name):
     
     if result.returncode != 0:
         if has_merge_conflicts():
-            print("\nERROR: Merge conflicts detected while syncing with develop.")
+            print("\n[ERROR] Merge conflicts detected while syncing with develop.")
             print("Resolve conflicts manually:")
             print("  1. Fix conflicts in the files")
             print("  2. Run: git add <resolved-files>")
@@ -262,7 +261,7 @@ def sync_branch_with_develop(branch_name):
             print(result.stderr, file=sys.stderr)
             sys.exit(1)
     
-    print(f"✓ Branch '{branch_name}' is now up to date with develop")
+    print(f"[OK] Branch '{branch_name}' is now up to date with develop")
 
 def get_conventional_commit_message():
     """Get a commit message following Conventional Commits specification."""
@@ -356,26 +355,26 @@ def main():
     print("\n=== Checking for changes ===")
     if not has_any_changes_from_develop():
         print("\n" + "="*60)
-        print("ℹ  NO CHANGES DETECTED")
+        print("[INFO] NO CHANGES DETECTED")
         print("="*60)
         print("Your working directory has no uncommitted changes,")
         print("and your current branch has no new commits compared to develop.")
         print("\nNothing to commit. Exiting.")
         sys.exit(0)
     
-    print("✓ Changes detected. Proceeding with check-in...")
+    print("[OK] Changes detected. Proceeding with check-in...")
 
     # STEP 1: Switch to develop and pull latest
     print("\n=== Updating develop branch ===")
     checkout_result = safe_checkout("develop")
     
     if checkout_result == "skip_checkout":
-        print("\n✓ Staying on current branch to commit your changes.")
+        print("\n[OK] Staying on current branch to commit your changes.")
     else:
         run(["git", "pull", "origin", "develop"])
         
         if has_merge_conflicts():
-            print("ERROR: Merge conflicts detected while updating develop. Resolve them and rerun.")
+            print("[ERROR] Merge conflicts detected while updating develop. Resolve them and rerun.")
             sys.exit(1)
 
     # STEP 2: Get desired branch name from user
@@ -385,11 +384,11 @@ def main():
         desired_branch = input("Enter branch name (e.g., feature/my-feature): ").strip()
         
         if not desired_branch:
-            print("ERROR: Branch name cannot be empty.")
+            print("[ERROR] Branch name cannot be empty.")
             continue
         
         if desired_branch.lower() in ["develop", "main", "master"]:
-            print("ERROR: Cannot use protected branch name.")
+            print("[ERROR] Cannot use protected branch name.")
             continue
         
         break
@@ -401,9 +400,9 @@ def main():
     # Case 1: Already on the desired branch OR branch exists
     if current_branch == desired_branch or branch_exists(desired_branch):
         if current_branch == desired_branch:
-            print(f"\n✓ You are already on branch '{desired_branch}'")
+            print(f"\n[OK] You are already on branch '{desired_branch}'")
         else:
-            print(f"\n⚠ Branch '{desired_branch}' already exists locally.")
+            print(f"\n[WARNING] Branch '{desired_branch}' already exists locally.")
         
         # Ask if they want to update it with develop
         update_branch = input(f"Do you want to update '{desired_branch}' with latest develop? [y/N]: ").strip().lower()
@@ -414,7 +413,7 @@ def main():
                 safe_checkout(desired_branch)
             
             if is_branch_up_to_date_with_develop(desired_branch):
-                print(f"✓ Branch '{desired_branch}' is already up to date with develop.")
+                print(f"[OK] Branch '{desired_branch}' is already up to date with develop.")
             else:
                 sync_branch_with_develop(desired_branch)
             
@@ -427,7 +426,7 @@ def main():
     else:
         # Branch doesn't exist - create it
         safe_checkout(final_branch, create_new=True)
-        print(f"✓ Created and switched to: {final_branch}")
+        print(f"[OK] Created and switched to: {final_branch}")
 
     # STEP 4: List and stage changed files
     print("\n=== Staging files ===")
@@ -457,7 +456,7 @@ def main():
     current_branch = get_current_branch()
     
     if current_branch.lower() in ["develop", "main", "master"]:
-        print(f"FATAL ERROR: Cannot push to protected branch '{current_branch}'!")
+        print(f"[FATAL ERROR] Cannot push to protected branch '{current_branch}'!")
         sys.exit(1)
 
     print(f"Ready to push to: origin/{current_branch}")
@@ -471,13 +470,13 @@ def main():
     run(["git", "push", "-u", "origin", current_branch])
     pushed_branch = current_branch
     
-    print(f"\n✓ Successfully pushed to origin/{current_branch}")
+    print(f"\n[OK] Successfully pushed to origin/{current_branch}")
     print(f"\n{'='*60}")
     print("NEXT STEPS")
     print(f"{'='*60}")
     print(f"1. Create a Pull/Merge Request from '{current_branch}' to 'develop'")
     print("2. Wait for PR approval and merge")
-    print("\n✓ Check-in complete!")
+    print("\n[OK] Check-in complete!")
     
     # The atexit handler will automatically:
     # - Switch to develop
